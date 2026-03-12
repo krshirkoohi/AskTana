@@ -1,0 +1,19 @@
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Database & State
+state.db
+server.log
+processed_nodes.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# OS
+.DS_Store
