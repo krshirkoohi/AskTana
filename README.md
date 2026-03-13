@@ -50,7 +50,7 @@ git push -u origin main
 ```
 
 ## How to Use
-1. On your phone (or desktop), create a node with the `#Ask Tana` tag. (You can get it from this template: https://app.tana.inc?nodeid=IIlnj_SS3293)
+1. On your phone (or desktop), create a node with the `#Ask Tana` tag. You can get it from [this](https://app.tana.inc?nodeid=IIlnj_SS3293) template.
 2. Type a message.
 3. Press Enter to create an empty child node.
 4. The server will detect the empty node, rename it to `⏳ Thinking...`, and then deliver the AI response.
