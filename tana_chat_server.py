@@ -16,13 +16,11 @@ TANA_URL = os.getenv("TANA_URL", "http://127.0.0.1:8262/mcp")
 GEMINI_PATH = os.getenv("GEMINI_PATH", "gemini")
 DB_PATH = os.path.join(BASE_DIR, "state.db")
 
-# Framework definitions (Tag IDs from the official template)
 TAG_CONFIGS = {
     "rz6VnOCKtT2r": { "FIELD_CHAT_ID": "SzMaBrkt7Hkc", "name": "Ask Tana" },
     "Y_bFazilblQ2": { "FIELD_CHAT_ID": "b1L_j8Bfspju", "name": "AI Chat" }
 }
 
-# --- Database ---
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY)")
@@ -41,7 +39,6 @@ def mark_done(node_id):
     conn.commit()
     conn.close()
 
-# --- Tana Communication ---
 def call_mcp(method, params):
     payload = {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": method, "arguments": params}, "id": 1}
     headers = {
@@ -60,7 +57,6 @@ def call_mcp(method, params):
         return res
     except: return None
 
-# --- AI Inference ---
 def get_ai(prompt, sid=None):
     cmd = [GEMINI_PATH, "--prompt", prompt, "--approval-mode", "yolo", "--allowed-mcp-server-names", "none", "--output-format", "json"]
     if sid: cmd.extend(["--resume", sid])
@@ -75,15 +71,11 @@ def get_ai(prompt, sid=None):
         return res, None
     except: return None, None
 
-# --- Processing Logic ---
 def process(c_id, config):
     nodes = call_mcp("get_children", {"nodeId": c_id})
     if not nodes or "children" not in nodes: return False
-    
     all_items = [c for c in nodes["children"] if c.get("docType") != "tuple"]
     if not all_items: return False
-
-    # TRUNCATED SCANNING: Only look at the last 20 items
     items = all_items[-20:] if len(all_items) > 20 else all_items
 
     for i in range(len(items)-1, 0, -1):
@@ -104,17 +96,24 @@ def process(c_id, config):
             if ans:
                 paste = f"%%tana%%\n- !! Assistant:\n"
                 ans_lines = [l.strip() for l in ans.split('\n') if l.strip()]
-                while ans_lines and (re.search(r'(?i)assistant:', ans_lines[0]) or len(ans_lines[0]) < 3):
+                
+                # Strip redundant headers
+                while ans_lines and (re.search(r'^(\*\*|__)?assistant:?(\*\*|__)?', ans_lines[0], flags=re.IGNORECASE) or len(ans_lines[0]) < 2):
                     ans_lines = ans_lines[1:]
+                
+                if not ans_lines: ans_lines = ["Understood."]
                 
                 current_indent = "  "
                 for line in ans_lines:
-                    is_list_item = re.match(r'^(\*\*|__)?(\d+\.|\*|-|#+|Step \d+:?)\s+', line)
-                    if is_list_item:
+                    is_header = re.match(r'^(\*\*|__)?(\d+\.|\*|-|#+|Step \d+:?)\s+', line)
+                    # Strip leading AI bullets to avoid double bulleting in Tana
+                    clean_line = re.sub(r'^(\*|-|\d+\.)\s+', '', line).strip()
+                    
+                    if is_header:
                         paste += f"  - {line}\n"
                         current_indent = "    "
                     else:
-                        paste += f"{current_indent}- {line}\n"
+                        paste += f"{current_indent}- {clean_line}\n"
                 
                 if call_mcp("import_tana_paste", {"parentNodeId": c_id, "content": paste}):
                     mark_done(m_id)
@@ -127,35 +126,22 @@ def process(c_id, config):
     return False
 
 def main():
-    print(f"[{time.strftime('%H:%M:%S')}] 🚀 Ask Tana Server (Adaptive-Turbo) Active.")
+    print(f"[{time.strftime('%H:%M:%S')}] 🚀 Ask Tana Server Active.")
     init_db()
-    
-    idle_sleep = 5
-    active_sleep = 1
-    current_sleep = idle_sleep
-    
     while True:
         try:
             any_processed = False
             for tid, cfg in TAG_CONFIGS.items():
-                # Note: Default implementation assumes standard workspaces
                 chats = call_mcp("search_nodes", {"query": {"hasType": tid}})
                 if isinstance(chats, list):
                     for c in chats:
                         if not c.get("inTrash"):
-                            if process(c["id"], cfg):
-                                any_processed = True
-            
-            if any_processed:
-                current_sleep = active_sleep
-            else:
-                current_sleep = idle_sleep
-                print(".", end="", flush=True)
-                
+                            if process(c["id"], cfg): any_processed = True
+            time.sleep(1 if any_processed else 5)
+            if not any_processed: print(".", end="", flush=True)
         except Exception as e: 
             print(f"\n❌ Error: {e}")
-            time.sleep(2)
-        time.sleep(current_sleep)
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
