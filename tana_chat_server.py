@@ -66,7 +66,7 @@ def get_ai(prompt, sid=None):
         if j_start != -1:
             data = json.loads(res[j_start:])
             raw_resp = data.get("response", "").strip()
-            clean_resp = re.sub(r'(?i)(YOLO mode is enabled|Loaded cached credentials|Loading extension|Both GOOGLE_API_KEY|Using GOOGLE_API_KEY|All tool calls).*?\n?', '', raw_resp)
+            clean_resp = re.sub(r'(?i)(YOLO mode is enabled|Loaded cached credentials|Loading extension|Both GOOGLE_API_KEY|Using GOOGLE_API_KEY|All tool calls).*?\n?', '', raw_resp, flags=re.IGNORECASE)
             return clean_resp.strip(), data.get("session_id")
         return res, None
     except: return None, None
@@ -94,26 +94,27 @@ def process(c_id, config):
             
             ans, new_sid = get_ai(m_txt, sid)
             if ans:
-                paste = f"%%tana%%\n- !! Assistant:\n"
-                ans_lines = [l.strip() for l in ans.split('\n') if l.strip()]
-                
-                # Strip redundant headers
-                while ans_lines and (re.search(r'^(\*\*|__)?assistant:?(\*\*|__)?', ans_lines[0], flags=re.IGNORECASE) or len(ans_lines[0]) < 2):
-                    ans_lines = ans_lines[1:]
+                raw_lines = [l.strip() for l in ans.split('\n') if l.strip()]
+                ans_lines = []
+                for line in raw_lines:
+                    # Strip leading markers to check content
+                    c = re.sub(r'^(\*\*|__)?(\*|-|\d+\.)\s*', '', line).strip()
+                    c = re.sub(r'(\*\*|__)?$', '', c).strip()
+                    if re.match(r'^(assistant|ai|bot|assistant:):?$', c, flags=re.IGNORECASE): continue
+                    ans_lines.append(line)
                 
                 if not ans_lines: ans_lines = ["Understood."]
                 
+                paste = f"%%tana%%\n- !! Assistant:\n"
                 current_indent = "  "
                 for line in ans_lines:
                     is_header = re.match(r'^(\*\*|__)?(\d+\.|\*|-|#+|Step \d+:?)\s+', line)
-                    # Strip leading AI bullets to avoid double bulleting in Tana
                     clean_line = re.sub(r'^(\*|-|\d+\.)\s+', '', line).strip()
-                    
                     if is_header:
                         paste += f"  - {line}\n"
                         current_indent = "    "
                     else:
-                        paste += f"{current_indent}- {clean_line}\n"
+                        if clean_line: paste += f"{current_indent}- {clean_line}\n"
                 
                 if call_mcp("import_tana_paste", {"parentNodeId": c_id, "content": paste}):
                     mark_done(m_id)
