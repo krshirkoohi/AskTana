@@ -13,7 +13,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 TANA_TOKEN = os.getenv("TANA_TOKEN")
 TANA_URL = os.getenv("TANA_URL", "http://127.0.0.1:8262/mcp")
-# Users should set this in their .env
 GEMINI_PATH = os.getenv("GEMINI_PATH", "gemini")
 DB_PATH = os.path.join(BASE_DIR, "state.db")
 
@@ -63,7 +62,6 @@ def call_mcp(method, params):
 
 # --- AI Inference ---
 def get_ai(prompt, sid=None):
-    # YOLO mode with isolated execution (no local MCP tools to prevent hangs)
     cmd = [GEMINI_PATH, "--prompt", prompt, "--approval-mode", "yolo", "--allowed-mcp-server-names", "none", "--output-format", "json"]
     if sid: cmd.extend(["--resume", sid])
     try:
@@ -72,7 +70,6 @@ def get_ai(prompt, sid=None):
         if j_start != -1:
             data = json.loads(res[j_start:])
             raw_resp = data.get("response", "").strip()
-            # CLEANUP: Remove technical noise patterns
             clean_resp = re.sub(r'(?i)(YOLO mode is enabled|Loaded cached credentials|Loading extension|Both GOOGLE_API_KEY|Using GOOGLE_API_KEY|All tool calls).*?\n?', '', raw_resp)
             return clean_resp.strip(), data.get("session_id")
         return res, None
@@ -81,20 +78,22 @@ def get_ai(prompt, sid=None):
 # --- Processing Logic ---
 def process(c_id, config):
     nodes = call_mcp("get_children", {"nodeId": c_id})
-    if not nodes or "children" not in nodes: return
-    items = [c for c in nodes["children"] if c.get("docType") != "tuple"]
-    if not items: return
+    if not nodes or "children" not in nodes: return False
+    
+    all_items = [c for c in nodes["children"] if c.get("docType") != "tuple"]
+    if not all_items: return False
+
+    # TRUNCATED SCANNING: Only look at the last 20 items
+    items = all_items[-20:] if len(all_items) > 20 else all_items
 
     for i in range(len(items)-1, 0, -1):
         p, m = items[i], items[i-1]
         p_txt, m_txt, m_id = p["name"].strip(), m["name"].strip(), m["id"]
         
-        # Implementation: Only process if a prompt is followed by an empty slot or "Thinking..."
-        if m_text and not m_text.startswith("🤖") and (not p_txt or p_txt == "⏳ Thinking...") and not is_done(m_id):
-            print(f"[{time.strftime('%H:%M:%S')}] 📬 Processing: {m_text[:30]}...")
+        if m_txt and not m_txt.startswith("🤖") and (not p_txt or p_txt == "⏳ Thinking...") and not is_done(m_id):
+            print(f"[{time.strftime('%H:%M:%S')}] 📬 Processing: {m_txt[:30]}...")
             call_mcp("edit_node", {"nodeId": p["id"], "name": {"old_string": p["name"], "new_string": "⏳ Thinking..."}})
             
-            # Get Session ID from metadata
             meta = call_mcp("read_node", {"nodeId": c_id, "maxDepth": 0})
             sid = None
             if meta and isinstance(meta, str):
@@ -103,17 +102,13 @@ def process(c_id, config):
             
             ans, new_sid = get_ai(m_txt, sid)
             if ans:
-                # Deliver Response with Bare Header and Hierarchy
                 paste = f"%%tana%%\n- !! Assistant:\n"
-                
                 ans_lines = [l.strip() for l in ans.split('\n') if l.strip()]
-                # Strip redundant headers
                 while ans_lines and (re.search(r'(?i)assistant:', ans_lines[0]) or len(ans_lines[0]) < 3):
                     ans_lines = ans_lines[1:]
                 
                 current_indent = "  "
                 for line in ans_lines:
-                    # Detect list items or bolded Step headers
                     is_list_item = re.match(r'^(\*\*|__)?(\d+\.|\*|-|#+|Step \d+:?)\s+', line)
                     if is_list_item:
                         paste += f"  - {line}\n"
@@ -127,23 +122,40 @@ def process(c_id, config):
                     if new_sid and new_sid != sid:
                         call_mcp("set_field_content", {"nodeId": c_id, "attributeId": config["FIELD_CHAT_ID"], "content": new_sid})
                     print(f"[{time.strftime('%H:%M:%S')}] ✅ Delivered.")
+                    return True
             break
+    return False
 
 def main():
-    print(f"[{time.strftime('%H:%M:%S')}] 🚀 Ask Tana Server Active.")
+    print(f"[{time.strftime('%H:%M:%S')}] 🚀 Ask Tana Server (Adaptive-Turbo) Active.")
     init_db()
+    
+    idle_sleep = 5
+    active_sleep = 1
+    current_sleep = idle_sleep
+    
     while True:
         try:
+            any_processed = False
             for tid, cfg in TAG_CONFIGS.items():
+                # Note: Default implementation assumes standard workspaces
                 chats = call_mcp("search_nodes", {"query": {"hasType": tid}})
                 if isinstance(chats, list):
                     for c in chats:
-                        if not c.get("inTrash"): process(c["id"], cfg)
-            print(".", end="", flush=True)
+                        if not c.get("inTrash"):
+                            if process(c["id"], cfg):
+                                any_processed = True
+            
+            if any_processed:
+                current_sleep = active_sleep
+            else:
+                current_sleep = idle_sleep
+                print(".", end="", flush=True)
+                
         except Exception as e: 
             print(f"\n❌ Error: {e}")
             time.sleep(2)
-        time.sleep(5)
+        time.sleep(current_sleep)
 
 if __name__ == "__main__":
     main()
