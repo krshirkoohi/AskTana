@@ -1,3 +1,5 @@
+<img width="2254" height="1684" alt="CleanShot 2026-06-30 at 5  29 25@2x" src="https://github.com/user-attachments/assets/8ca610bd-6b89-463a-967b-8b2a47680e9c" />
+
 # Ask Tana Server (Mobile-Optimized)
 
 A standalone Python server that turns any Tana node into a real-time AI chat interface. Optimized for the Tana Mobile app, but works anywhere.
